@@ -4,3 +4,12 @@ pycryptodome
 requests
 asyncio
 PySocks
+colorama
+urllib3
+psutil
+beautifulsoup4
+fake-useragent
+pytz
+python-dateutil
+tqdm
+cryptography
