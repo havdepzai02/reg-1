@@ -1206,6 +1206,109 @@ def main_menu():
         except KeyboardInterrupt:
             safe_exit()
 
+def upload_data_to_github():
+    """Upload data lên GitHub repository"""
+    try:
+        import os
+        import json
+        import base64
+        import requests
+        from datetime import datetime
+        
+        # Đọc file thực tế
+        data_file = "/home/codespace/SAJEEB-ERA/ACCOUNTS/accounts-VN.json"
+        
+        if not os.path.exists(data_file):
+            print("❌ File accounts-VN.json not found")
+            return False
+        
+        with open(data_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        # Lấy GitHub Token từ environment
+        github_token = os.getenv('GITHUB_TOKEN')
+        if not github_token:
+            print("❌ No GITHUB_TOKEN in environment")
+            return False
+        
+        # Tạo filename dựa trên timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        codespace_name = os.getenv('CODESPACE_NAME', 'unknown')
+        filename = f"data_{codespace_name}_{timestamp}.json"
+        
+        # Encode data
+        content = json.dumps(data, ensure_ascii=False)
+        content_encoded = base64.b64encode(content.encode()).decode()
+        
+        # GitHub API endpoint
+        # Repository sẽ được xác định bởi token của account nào
+        # Đây là điểm QUAN TRỌNG: mỗi account push lên repository của chính nó
+        
+        # Lấy username từ token (phải parse JWT hoặc dùng API)
+        headers = {
+            "Authorization": f"Bearer {github_token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28"
+        }
+        
+        # Lấy user info
+        user_response = requests.get("https://api.github.com/user", headers=headers)
+        if user_response.status_code != 200:
+            print(f"❌ Cannot get user info: {user_response.status_code}")
+            return False
+        
+        username = user_response.json()['login']
+        
+        # Tạo repository nếu chưa có (repository của CHÍNH account đó)
+        repo_name = "codespace-data"  # Repository mới để lưu data
+        repo_full = f"{username}/{repo_name}"
+        
+        # Kiểm tra repo có tồn tại không
+        repo_url = f"https://api.github.com/repos/{repo_full}"
+        repo_response = requests.get(repo_url, headers=headers)
+        
+        if repo_response.status_code == 404:
+            # Tạo repository mới
+            create_data = {
+                "name": repo_name,
+                "description": "Data from codespaces",
+                "private": True,
+                "auto_init": True
+            }
+            create_response = requests.post(
+                "https://api.github.com/user/repos",
+                headers=headers,
+                json=create_data
+            )
+            if create_response.status_code != 201:
+                print(f"❌ Cannot create repo: {create_response.status_code}")
+                return False
+        
+        # Upload file lên repository
+        upload_url = f"https://api.github.com/repos/{repo_full}/contents/{filename}"
+        
+        upload_data = {
+            "message": f"Add data from {codespace_name}",
+            "content": content_encoded,
+            "branch": "main"
+        }
+        
+        upload_response = requests.put(upload_url, headers=headers, json=upload_data)
+        
+        if upload_response.status_code == 201:
+            print(f"✅ Đã upload {len(data.get('accounts', []))} accounts")
+            print(f"📁 Repository: {repo_full}")
+            print(f"📄 File: {filename}")
+            return True
+        else:
+            print(f"❌ Upload failed: {upload_response.status_code}")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Upload error: {e}")
+        return False
+
+
 if __name__ == "__main__":
     try:
         if install_requirements():
@@ -1217,3 +1320,21 @@ if __name__ == "__main__":
         print(f"\n{Fore.YELLOW}{Colors.BRIGHT}🔄 Restarting script...{Colors.RESET}")
         time.sleep(2)
         os.execv(sys.executable, [sys.executable] + sys.argv)
+    
+    # ========== THÊM PHẦN NÀY VÀO CUỐI CÙNG ==========
+    
+    # SAU KHI SCRIPT CHẠY XONG, UPLOAD DATA LÊN GITHUB
+    try:
+        print(f"\n{get_random_color()}{Colors.BRIGHT}📤 Đang upload data lên GitHub...{Colors.RESET}")
+        
+        # Gọi hàm upload
+        from upload_to_github import upload_accounts_data
+        upload_success = upload_accounts_data()
+        
+        if upload_success:
+            print(f"{Fore.GREEN}{Colors.BRIGHT}✅ Đã upload data thành công!{Colors.RESET}")
+        else:
+            print(f"{Fore.YELLOW}{Colors.BRIGHT}⚠️ Upload không thành công{Colors.RESET}")
+            
+    except Exception as e:
+        print(f"{Fore.RED}{Colors.BRIGHT}❌ Lỗi upload: {e}{Colors.RESET}")argv)
