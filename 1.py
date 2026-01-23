@@ -22,80 +22,74 @@ import re
 import subprocess
 import importlib
 
+# ====================== THÊM IMPORT MỚI ======================
+from fake_useragent import UserAgent  # THÊM DÒNG NÀY
+
 init(autoreset=True)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# ====================== SIMPLE IP ROTATION ======================
-class SimpleIPManager:
-    def __init__(self):
-        self.account_counter = 0
-        self.accounts_per_ip = 100
-        self.lock = threading.Lock()
-        self.rotation_count = 0
-        self.current_ip = "Unknown"
+# ====================== IP & USER-AGENT ROTATION CLASS ======================
+class IdentityManager:
+    """QUẢN LÝ XOAY USER-AGENT VÀ PROXY (CHỈ THÊM VÀO)"""
+    def __init__(self, use_proxy_fallback=False):
+        self.ua = UserAgent()
+        self.use_proxy_fallback = use_proxy_fallback
+        self.proxy_list = []
+        self.proxy_cache_time = 0
+        self.request_counter = 0
+        self.ip_rotation_threshold = 100  # Đổi IP sau 100 account
         
-    def get_public_ip(self):
-        """Lấy IP public hiện tại"""
-        ip_services = [
-            "https://api.ipify.org",
-            "https://checkip.amazonaws.com",
-            "https://ipinfo.io/ip",
-            "https://icanhazip.com"
-        ]
-        
-        for service in ip_services:
-            try:
-                response = requests.get(service, timeout=10)
-                if response.status_code == 200:
-                    ip = response.text.strip()
-                    print(f"{Fore.CYAN}[+] Current IP: {ip}{Style.RESET_ALL}")
-                    self.current_ip = ip
-                    return ip
-            except:
-                continue
-        
-        print(f"{Fore.YELLOW}[!] Could not get public IP{Style.RESET_ALL}")
-        return "Unknown"
+    def get_random_user_agent(self):
+        """Lấy User-Agent ngẫu nhiên"""
+        return self.ua.random
     
-    def rotate_ip_simple(self):
-        """Phương pháp đổi IP đơn giản nhất - thay đổi User-Agent và headers"""
+    def get_fresh_proxies(self):
+        """Lấy proxy mới từ API (chỉ dùng khi bị block)"""
         try:
-            print(f"{Fore.CYAN}[+] Rotating IP identity...{Style.RESET_ALL}")
+            print(f"{Fore.CYAN}[+] Fetching fresh proxies...{Style.RESET_ALL}")
+            response = requests.get(
+                "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=all",
+                timeout=10
+            )
             
-            # Lấy IP mới để kiểm tra
-            new_ip = self.get_public_ip()
-            
-            if new_ip != "Unknown":
-                self.rotation_count += 1
-                print(f"{Fore.GREEN}[✓] IP Rotation #{self.rotation_count} complete! New IP: {new_ip}{Style.RESET_ALL}")
-                return True
-            
-            return False
-            
-        except Exception as e:
-            print(f"{Fore.YELLOW}[!] IP rotation failed: {e}{Style.RESET_ALL}")
-            return False
+            if response.status_code == 200:
+                proxies = response.text.strip().split('\r\n')
+                self.proxy_list = [p.strip() for p in proxies if p.strip()]
+                self.proxy_cache_time = time.time()
+                print(f"{Fore.GREEN}[✓] Got {len(self.proxy_list)} proxies{Style.RESET_ALL}")
+        except:
+            pass
+    
+    def get_proxy_dict(self):
+        """Lấy proxy dictionary nếu cần"""
+        if not self.proxy_list or time.time() - self.proxy_cache_time > 300:
+            self.get_fresh_proxies()
+        
+        if self.proxy_list:
+            proxy = random.choice(self.proxy_list)
+            return {
+                'http': f'http://{proxy}',
+                'https': f'http://{proxy}'
+            }
+        return None
     
     def should_rotate_ip(self):
-        """Kiểm tra xem có nên đổi IP không"""
-        with self.lock:
-            self.account_counter += 1
-            
-            # Đổi IP khi bắt đầu (lần đầu)
-            if self.account_counter == 1:
-                print(f"{Fore.CYAN}[+] First account, getting initial IP...{Style.RESET_ALL}")
-                return True
-            
-            # Đổi IP sau mỗi 100 account
-            if self.account_counter % self.accounts_per_ip == 0:
-                print(f"{Fore.CYAN}[+] Reached {self.account_counter} accounts, rotating IP...{Style.RESET_ALL}")
-                return True
-            
-            return False
+        """Kiểm tra có nên đổi IP không (sau 100 account)"""
+        self.request_counter += 1
+        return self.request_counter % self.ip_rotation_threshold == 0
+    
+    def smart_delay(self):
+        """Delay thông minh giữa các request"""
+        base_delay = random.uniform(1, 3)
+        
+        # Đôi khi delay lâu hơn
+        if random.random() < 0.1:  # 10% chance
+            base_delay += random.uniform(2, 5)
+        
+        time.sleep(base_delay)
+        return base_delay
 
-# Tạo instance IP Manager
-ip_manager = SimpleIPManager()
-
+# ====================== PHẦN DƯỚI ĐÂY GIỮ NGUYÊN CODE GỐC ======================
 def get_random_color():
     colors = [Fore.LIGHTGREEN_EX, Fore.LIGHTYELLOW_EX, Fore.LIGHTWHITE_EX, Fore.LIGHTBLUE_EX]
     return random.choice(colors)
@@ -123,31 +117,11 @@ GHOST_ACCOUNTS_FOLDER = os.path.join(GHOST_FOLDER, "ACCOUNTS")
 GHOST_RARE_FOLDER = os.path.join(GHOST_FOLDER, "RAREACCOUNT")
 GHOST_COUPLES_FOLDER = os.path.join(GHOST_FOLDER, "COUPLESACCOUNT")
 
-for folder in [BASE_FOLDER, TOKENS_FOLDER, ACCOUNTS_FOLDER, RARE_ACCOUNTS_FOLDER, 
-               COUPLES_ACCOUNTS_FOLDER, GHOST_FOLDER, GHOST_ACCOUNTS_FOLDER, 
-               GHOST_RARE_FOLDER, GHOST_COUPLES_FOLDER]:
+for folder in [BASE_FOLDER, TOKENS_FOLDER, ACCOUNTS_FOLDER, RARE_ACCOUNTS_FOLDER, COUPLES_ACCOUNTS_FOLDER, GHOST_FOLDER, GHOST_ACCOUNTS_FOLDER, GHOST_RARE_FOLDER, GHOST_COUPLES_FOLDER]:
     os.makedirs(folder, exist_ok=True)
 
-REGION_LANG = {
-    "ME": "ar", "IND": "hi", "ID": "id", "VN": "vi", "TH": "th", 
-    "BD": "bn", "PK": "ur", "TW": "zh", "CIS": "ru", "SAC": "es", "BR": "pt"
-}
-
-REGION_URLS = {
-    "IND": "https://client.ind.freefiremobile.com/",
-    "ID": "https://clientbp.ggblueshark.com/",
-    "BR": "https://client.us.freefiremobile.com/",
-    "ME": "https://clientbp.common.ggbluefox.com/",
-    "VN": "https://clientbp.ggblueshark.com/",
-    "TH": "https://clientbp.common.ggbluefox.com/",
-    "CIS": "https://clientbp.ggblueshark.com/",
-    "BD": "https://clientbp.ggblueshark.com/",
-    "PK": "https://clientbp.ggblueshark.com/",
-    "SG": "https://clientbp.ggblueshark.com/",
-    "SAC": "https://client.us.freefiremobile.com/",
-    "TW": "https://clientbp.ggblueshark.com/"
-}
-
+REGION_LANG = {"ME": "ar","IND": "hi","ID": "id","VN": "vi","TH": "th","BD": "bn","PK": "ur","TW": "zh","CIS": "ru","SAC": "es","BR": "pt"}
+REGION_URLS = {"IND": "https://client.ind.freefiremobile.com/","ID": "https://clientbp.ggblueshark.com/","BR": "https://client.us.freefiremobile.com/","ME": "https://clientbp.common.ggbluefox.com/","VN": "https://clientbp.ggblueshark.com/","TH": "https://clientbp.common.ggbluefox.com/","CIS": "https://clientbp.ggblueshark.com/","BD": "https://clientbp.ggblueshark.com/","PK": "https://clientbp.ggblueshark.com/","SG": "https://clientbp.ggblueshark.com/","SAC": "https://client.us.freefiremobile.com/","TW": "https://clientbp.ggblueshark.com/"}
 hex_key = "32656534343831396539623435393838343531343130363762323831363231383734643064356437616639643866376530306331653534373135623764316533"
 key = bytes.fromhex(hex_key)
 hex_data = "8J+agCBQUkVNSVVNIEFDQ09VTlQgR0VORVJBVE9SIPCfkqsgQnkgU1BJREVFUklPIHwgTm90IEZvciBTYWxlIPCfkas="
@@ -196,6 +170,10 @@ ACCOUNT_COUPLES_PATTERNS = {
 POTENTIAL_COUPLES = {}
 COUPLES_LOCK = threading.Lock()
 
+# ====================== KHỞI TẠO IDENTITY MANAGER ======================
+identity_manager = IdentityManager(use_proxy_fallback=False)
+
+# ====================== CÁC HÀM GỐC GIỮ NGUYÊN ======================
 def check_account_rarity(account_data):
     account_id = account_data.get("account_id", "")
     
@@ -411,7 +389,8 @@ def install_requirements():
         'pycryptodome',
         'colorama',
         'urllib3',
-        'psutil'
+        'psutil',
+        'fake-useragent'  # THÊM DÒNG NÀY
     ]
     
     print(f"{get_random_color()}{Colors.BRIGHT}🔍 Checking required packages...{Colors.RESET}")
@@ -420,6 +399,8 @@ def install_requirements():
         try:
             if package == 'pycryptodome':
                 import Crypto
+            elif package == 'fake-useragent':
+                from fake_useragent import UserAgent  # THÊM
             else:
                 importlib.import_module(package)
             print(f"{get_random_color()}✅ {package} is installed{Colors.RESET}")
@@ -578,7 +559,7 @@ def save_jwt_token(account_data, jwt_token, region, is_ghost=False):
             'jwt_token': jwt_token,
             'name': account_data["name"],
             'password': account_data["password"],
-            'date_time': datetime.now().strftime('%Y-%m-d %H:%M:%S'),
+            'date_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'region': "SPIDEERIO" if is_ghost else region,
             'thread_id': account_data.get('thread_id', 'N/A')
         }
@@ -655,8 +636,50 @@ def save_normal_account(account_data, region, is_ghost=False):
         return False
 
 def smart_delay():
-    time.sleep(random.uniform(1, 2))
+    # SỬA LẠI: Dùng identity_manager
+    delay = identity_manager.smart_delay()
+    return delay
 
+# ====================== SỬA CÁC HÀM REQUEST ======================
+def make_request_with_rotation(method, url, **kwargs):
+    """Wrapper cho requests với rotation"""
+    try:
+        # 1. Xoay User-Agent
+        headers = kwargs.get('headers', {})
+        headers['User-Agent'] = identity_manager.get_random_user_agent()
+        kwargs['headers'] = headers
+        
+        # 2. Smart delay trước request
+        delay = identity_manager.smart_delay()
+        print(f"{Fore.CYAN}[⏳] Delay: {delay:.1f}s before request{Style.RESET_ALL}")
+        
+        # 3. Kiểm tra có nên dùng proxy không
+        if identity_manager.should_rotate_ip():
+            print(f"{Fore.MAGENTA}[🔄] Rotating IP (after {identity_manager.request_counter} accounts){Style.RESET_ALL}")
+            proxy = identity_manager.get_proxy_dict()
+            if proxy:
+                kwargs['proxies'] = proxy
+                print(f"{Fore.BLUE}[🌐] Using proxy: {proxy['http'][:50]}...{Style.RESET_ALL}")
+        
+        # 4. Thực hiện request
+        response = requests.request(method=method, url=url, **kwargs)
+        
+        # 5. Xử lý response
+        if response.status_code in [429, 403]:  # Rate limited or blocked
+            print(f"{Fore.YELLOW}[⚠️] Server blocked (Status: {response.status_code}){Style.RESET_ALL}")
+            print(f"{Fore.YELLOW}[🔄] Enabling proxy fallback...{Style.RESET_ALL}")
+            identity_manager.use_proxy_fallback = True
+            time.sleep(random.uniform(5, 10))
+            
+        return response
+        
+    except Exception as e:
+        print_error(f"Request error: {e}")
+        # Enable proxy fallback nếu có lỗi kết nối
+        identity_manager.use_proxy_fallback = True
+        return None
+
+# ====================== SỬA CÁC HÀM CHÍNH ======================
 def create_acc(region, account_name, password_prefix, is_ghost=False):
     if EXIT_FLAG:
         return None
@@ -668,14 +691,19 @@ def create_acc(region, account_name, password_prefix, is_ghost=False):
         
         url = "https://100067.connect.garena.com/oauth/guest/register"
         headers = {
-            "User-Agent": "GarenaMSDK/4.0.19P8(ASUS_Z01QD ;Android 12;en;US;)",
+            "User-Agent": identity_manager.get_random_user_agent(),  # THÊM
             "Authorization": "Signature " + signature,
             "Content-Type": "application/x-www-form-urlencoded",
             "Accept-Encoding": "gzip",
             "Connection": "Keep-Alive"
         }
         
-        response = requests.post(url, headers=headers, data=data, timeout=30, verify=False)
+        # SỬA: Dùng make_request_with_rotation
+        response = make_request_with_rotation('POST', url, headers=headers, data=data, timeout=30, verify=False)
+        
+        if response is None:
+            return None
+            
         response.raise_for_status()
         
         if 'uid' in response.json():
@@ -699,7 +727,7 @@ def token(uid, password, region, account_name, password_prefix, is_ghost=False):
             "Connection": "Keep-Alive",
             "Content-Type": "application/x-www-form-urlencoded",
             "Host": "100067.connect.garena.com",
-            "User-Agent": "GarenaMSDK/4.0.19P8(ASUS_Z01QD ;Android 12;en;US;)",
+            "User-Agent": identity_manager.get_random_user_agent(),  # THÊM
         }
         body = {
             "uid": uid,
@@ -710,7 +738,12 @@ def token(uid, password, region, account_name, password_prefix, is_ghost=False):
             "client_id": "100067"
         }
         
-        response = requests.post(url, headers=headers, data=body, timeout=30, verify=False)
+        # SỬA: Dùng make_request_with_rotation
+        response = make_request_with_rotation('POST', url, headers=headers, data=body, timeout=30, verify=False)
+        
+        if response is None:
+            return None
+            
         response.raise_for_status()
         
         if 'open_id' in response.json():
@@ -729,20 +762,6 @@ def token(uid, password, region, account_name, password_prefix, is_ghost=False):
         print_warning(f"Token grant failed: {e}")
         smart_delay()
         return None
-
-def encode_string(original):
-    keystream = [0x30, 0x30, 0x30, 0x32, 0x30, 0x31, 0x37, 0x30, 0x30, 0x30, 0x30, 0x30, 0x32, 0x30, 0x31, 0x37,
-                 0x30, 0x30, 0x30, 0x30, 0x30, 0x32, 0x30, 0x31, 0x37, 0x30, 0x30, 0x30, 0x30, 0x30, 0x32, 0x30]
-    encoded = ""
-    for i in range(len(original)):
-        orig_byte = ord(original[i])
-        key_byte = keystream[i % len(keystream)]
-        result_byte = orig_byte ^ key_byte
-        encoded += chr(result_byte)
-    return {"open_id": original, "field_14": encoded}
-
-def to_unicode_escaped(s):
-    return ''.join(c if 32 <= ord(c) <= 126 else f'\\u{ord(c):04x}' for c in s)
 
 def Major_Regsiter(access_token, open_id, field, uid, password, region, account_name, password_prefix, is_ghost=False):
     if EXIT_FLAG:
@@ -766,7 +785,7 @@ def Major_Regsiter(access_token, open_id, field, uid, password, region, account_
             "Expect": "100-continue",
             "Host": "loginbp.ggblueshark.com" if is_ghost or region.upper() not in ["ME", "TH"] else "loginbp.common.ggbluefox.com",
             "ReleaseVersion": "OB52",
-            "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; ASUS_I005DA Build/PI)",
+            "User-Agent": identity_manager.get_random_user_agent(),  # THÊM
             "X-GA": "v1 1",
             "X-Unity-Version": "2018.4."
         }
@@ -789,8 +808,12 @@ def Major_Regsiter(access_token, open_id, field, uid, password, region, account_
         payload_bytes = CrEaTe_ProTo(payload)
         encrypted_payload = E_AEs(payload_bytes.hex())
         
-        response = requests.post(url, headers=headers, data=encrypted_payload, verify=False, timeout=30)
+        # SỬA: Dùng make_request_with_rotation
+        response = make_request_with_rotation('POST', url, headers=headers, data=encrypted_payload, verify=False, timeout=30)
         
+        if response is None:
+            return None
+            
         if response.status_code == 200:
             print_success(f"MajorRegister successful: {name}")
             
@@ -851,7 +874,7 @@ def perform_major_login(uid, password, access_token, open_id, region, is_ghost=F
             "Expect": "100-continue",
             "Host": "loginbp.ggblueshark.com" if is_ghost or region.upper() not in ["ME", "TH"] else "loginbp.common.ggbluefox.com",
             "ReleaseVersion": "OB52",
-            "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; ASUS_I005DA Build/PI)",
+            "User-Agent": identity_manager.get_random_user_agent(),  # THÊM
             "X-GA": "v1 1",
             "X-Unity-Version": "2018.4.11f1"
         }
@@ -863,8 +886,12 @@ def perform_major_login(uid, password, access_token, open_id, region, is_ghost=F
         d = encrypt_api(data.hex())
         final_payload = bytes.fromhex(d)
 
-        response = requests.post(url, headers=headers, data=final_payload, verify=False, timeout=30)
+        # SỬA: Dùng make_request_with_rotation
+        response = make_request_with_rotation('POST', url, headers=headers, data=final_payload, verify=False, timeout=30)
         
+        if response is None:
+            return {"account_id": "N/A", "jwt_token": ""}
+            
         if response.status_code == 200 and len(response.text) > 10:
             jwt_start = response.text.find("eyJ")
             if jwt_start != -1:
@@ -880,23 +907,6 @@ def perform_major_login(uid, password, access_token, open_id, region, is_ghost=F
     except Exception as e:
         print_warning(f"MajorLogin failed: {e}")
         return {"account_id": "N/A", "jwt_token": ""}
-
-def decode_jwt_token(jwt_token):
-    try:
-        parts = jwt_token.split('.')
-        if len(parts) >= 2:
-            payload_part = parts[1]
-            padding = 4 - len(payload_part) % 4
-            if padding != 4:
-                payload_part += '=' * padding
-            decoded = base64.urlsafe_b64decode(payload_part)
-            data = json.loads(decoded)
-            account_id = data.get('account_id') or data.get('external_id')
-            if account_id:
-                return str(account_id)
-    except Exception as e:
-        print_warning(f"JWT decode failed: {e}")
-    return "N/A"
 
 def force_region_binding(region, jwt_token):
     try:
@@ -916,7 +926,7 @@ def force_region_binding(region, jwt_token):
         payload = bytes.fromhex(encrypted_data)
         
         headers = {
-            'User-Agent': "Dalvik/2.1.0 (Linux; U; Android 12; M2101K7AG Build/SKQ1.210908.001)",
+            'User-Agent': identity_manager.get_random_user_agent(),  # THÊM
             'Connection': "Keep-Alive",
             'Accept-Encoding': "gzip",
             'Content-Type': "application/x-www-form-urlencoded",
@@ -927,27 +937,42 @@ def force_region_binding(region, jwt_token):
             'ReleaseVersion': "OB52"
         }
         
-        response = requests.post(url, data=payload, headers=headers, verify=False, timeout=30)
+        # SỬA: Dùng make_request_with_rotation
+        response = make_request_with_rotation('POST', url, data=payload, headers=headers, verify=False, timeout=30)
+        
+        if response is None:
+            return False
+            
         return response.status_code == 200
     except Exception as e:
         print_warning(f"Region binding failed: {e}")
         return False
 
+def decode_jwt_token(jwt_token):
+    try:
+        parts = jwt_token.split('.')
+        if len(parts) >= 2:
+            payload_part = parts[1]
+            padding = 4 - len(payload_part) % 4
+            if padding != 4:
+                payload_part += '=' * padding
+            decoded = base64.urlsafe_b64decode(payload_part)
+            data = json.loads(decoded)
+            account_id = data.get('account_id') or data.get('external_id')
+            if account_id:
+                return str(account_id)
+    except Exception as e:
+        print_warning(f"JWT decode failed: {e}")
+    return "N/A"
+
 def generate_single_account(region, account_name, password_prefix, total_accounts, thread_id, is_ghost=False):
     global SUCCESS_COUNTER, RARE_COUNTER, COUPLES_COUNTER
-    
     if EXIT_FLAG:
         return None
         
     with LOCK:
         if SUCCESS_COUNTER >= total_accounts:
             return None
-
-    # KIỂM TRA VÀ ĐỔI IP NẾU CẦN
-    if ip_manager.should_rotate_ip():
-        ip_manager.rotate_ip_simple()
-        # Thêm delay sau khi đổi IP
-        time.sleep(3)
 
     account_result = create_acc(region, account_name, password_prefix, is_ghost)
     if not account_result:
@@ -964,9 +989,6 @@ def generate_single_account(region, account_name, password_prefix, total_account
 
     print_registration_status(current_count, total_accounts, account_result["name"], 
                             account_result["uid"], account_result["password"], account_id, region, is_ghost)
-    
-    # Hiển thị IP info
-    print(f"{Fore.CYAN}[+] Accounts on current IP: {ip_manager.account_counter}/{ip_manager.accounts_per_ip}{Style.RESET_ALL}")
     
     is_rare, rarity_type, rarity_reason, rarity_score = check_account_rarity(account_result)
     if is_rare:
@@ -1021,6 +1043,7 @@ def worker(region, account_name, password_prefix, total_accounts, thread_id, is_
         if result:
             accounts_generated += 1
         
+        # Vẫn giữ delay gốc
         time.sleep(random.uniform(0.5, 1.5))
     
     print(f"{thread_color}{Colors.BRIGHT}🧵 Thread {thread_id} finished: {accounts_generated} accounts generated{Colors.RESET}")
@@ -1029,21 +1052,20 @@ def wait_for_enter():
     print(f"\n{get_random_color()}{Colors.BRIGHT}⏎ Press Enter to continue...{Colors.RESET}")
     input()
 
+# ====================== SỬA generate_accounts_flow ======================
 def generate_accounts_flow():
     global SUCCESS_COUNTER, TARGET_ACCOUNTS, RARE_COUNTER, COUPLES_COUNTER, RARITY_SCORE_THRESHOLD
-    
     clear_screen()
     display_banner()
     
-    # LẤY IP BAN ĐẦU
-    print(f"{Fore.CYAN}[+] Getting initial IP address...{Style.RESET_ALL}")
-    initial_ip = ip_manager.get_public_ip()
-    print(f"{Fore.GREEN}[✓] Initial IP: {initial_ip}{Style.RESET_ALL}")
+    # THÊM OPTION PROXY
+    use_proxy = input(f"\n{get_random_color()}{Colors.BRIGHT}🌐 Enable proxy fallback when blocked? (y/n): {Colors.RESET}").strip().lower() == 'y'
+    identity_manager.use_proxy_fallback = use_proxy
     
     cpu_count = psutil.cpu_count()
     recommended_threads = min(cpu_count, 3)
     
-    print(f"\n{get_random_color()}{Colors.BRIGHT}🌍 Available Regions:{Colors.RESET}")
+    print(f"{get_random_color()}{Colors.BRIGHT}🌍 Available Regions:{Colors.RESET}")
     
     regions_to_show = [region for region in REGION_LANG.keys() if region != "BR"]
     
@@ -1098,12 +1120,13 @@ def generate_accounts_flow():
     else:
         print(f"{get_random_color()}{Colors.BRIGHT}🌍 Selected Region: {selected_region} ({REGION_LANG[selected_region]}){Colors.RESET}")
     
-    print(f"{Fore.CYAN}[+] Current IP: {ip_manager.current_ip}{Style.RESET_ALL}")
-    print(f"{Fore.CYAN}[+] IP will rotate after every 100 accounts{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}[🔄] User-Agent rotation: ENABLED{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}[🌐] Proxy fallback: {'ENABLED' if use_proxy else 'DISABLED'}{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}[⏱️] Smart delays: ENABLED{Style.RESET_ALL}")
 
     while True:
         try:
-            account_count = int(input(f"\n{get_random_color()}{Colors.BRIGHT}🎯 Total Accounts to Generate: {Colors.RESET}"))
+            account_count = int(input(f"\n{get_random_color()}{Colors.BRIGHT}🎯 Total Accounts to Generate Mixed: {Colors.RESET}"))
             if account_count > 0:
                 break
             else:
@@ -1129,7 +1152,7 @@ def generate_accounts_flow():
 
     while True:
         try:
-            rarity_threshold = int(input(f"\n{get_random_color()}{Colors.BRIGHT}⭐ Rarity Threshold (2-10): {Colors.RESET}"))
+            rarity_threshold = int(input(f"\n{get_random_color()}{Colors.BRIGHT}⭐ Rarity Threshold Put 2: {Colors.RESET}"))
             if 1 <= rarity_threshold <= 10:
                 RARITY_SCORE_THRESHOLD = rarity_threshold
                 break
@@ -1142,7 +1165,7 @@ def generate_accounts_flow():
 
     while True:
         try:
-            thread_count = int(input(f"\n{get_random_color()}{Colors.BRIGHT}🧵 Thread Count (Recommended: {recommended_threads}): {Colors.RESET}"))
+            thread_count = int(input(f"\n{get_random_color()}{Colors.BRIGHT}🧵 Speed/Thread Count : Put less than 5 Jitna km Utna IP BAN KM (Recommended: {recommended_threads}): {Colors.RESET}"))
             if thread_count > 0:
                 break
             else:
@@ -1165,8 +1188,8 @@ def generate_accounts_flow():
     print(f"{get_random_color()}{Colors.BRIGHT}🔑 Password Prefix: {password_prefix}{Colors.RESET}")
     print(f"{get_random_color()}{Colors.BRIGHT}⭐ Rarity Threshold: {RARITY_SCORE_THRESHOLD}+{Colors.RESET}")
     print(f"{get_random_color()}{Colors.BRIGHT}🧵 Threads: {thread_count}{Colors.RESET}")
-    print(f"{get_random_color()}{Colors.BRIGHT}🌐 Current IP: {ip_manager.current_ip}{Colors.RESET}")
-    print(f"{get_random_color()}{Colors.BRIGHT}🔄 IP Rotation: Every 100 accounts{Colors.RESET}")
+    print(f"{get_random_color()}{Colors.BRIGHT}🔄 Anti-block: User-Agent rotation + Smart delays{Colors.RESET}")
+    print(f"{get_random_color()}{Colors.BRIGHT}🌐 Proxy fallback: {'ON (when blocked)' if use_proxy else 'OFF'}{Colors.RESET}")
     print(f"{get_random_color()}{Colors.BRIGHT}📁 Saving to: {ACCOUNTS_FOLDER}{Colors.RESET}")
     print(f"\n{get_random_color()}{Colors.BRIGHT}⏳ Starting in 3 seconds...{Colors.RESET}")
     time.sleep(3)
@@ -1175,35 +1198,24 @@ def generate_accounts_flow():
     TARGET_ACCOUNTS = account_count
     RARE_COUNTER = 0
     COUPLES_COUNTER = 0
-    # Reset IP manager counter
-    ip_manager.account_counter = 0
-    ip_manager.rotation_count = 0
-    
     start_time = time.time()
     threads = []
 
     print(f"\n{get_random_color()}{Colors.BRIGHT}🚀 Starting generation with {thread_count} threads...{Colors.RESET}\n")
 
     for i in range(thread_count):
-        t = threading.Thread(target=worker, args=(selected_region, account_name, 
-                                                 password_prefix, account_count, 
-                                                 i+1, is_ghost))
+        t = threading.Thread(target=worker, args=(selected_region, account_name, password_prefix, account_count, i+1, is_ghost))
         t.daemon = True
         t.start()
         threads.append(t)
 
     try:
-        # Progress monitoring
         while any(t.is_alive() for t in threads):
             time.sleep(2)
             with LOCK:
                 current_count = SUCCESS_COUNTER
-            
             progress = (current_count / account_count) * 100
-            print(f"{get_random_color()}{Colors.BRIGHT}📊 Progress: {current_count}/{account_count} ({progress:.1f}%) | "
-                  f"💎 Rare: {RARE_COUNTER} | 💑 Couples: {COUPLES_COUNTER} | "
-                  f"🌐 IP: {ip_manager.current_ip} | 🔄 Rotations: {ip_manager.rotation_count}{Colors.RESET}")
-            
+            print(f"{get_random_color()}{Colors.BRIGHT}📊 Progress: {current_count}/{account_count} ({progress:.1f}%) | 💎 Rare: {RARE_COUNTER} | 💑 Couples: {COUPLES_COUNTER}{Colors.RESET}")
             if current_count >= account_count:
                 break
                 
@@ -1223,10 +1235,13 @@ def generate_accounts_flow():
     print(f"{get_random_color()}{Colors.BRIGHT}📊 Accounts generated: {SUCCESS_COUNTER}/{account_count}{Colors.RESET}")
     print(f"{get_random_color()}{Colors.BRIGHT}💎 Rare accounts found: {RARE_COUNTER}{Colors.RESET}")
     print(f"{get_random_color()}{Colors.BRIGHT}💑 Couples pairs found: {COUPLES_COUNTER}{Colors.RESET}")
-    print(f"{get_random_color()}{Colors.BRIGHT}🌐 IP rotations: {ip_manager.rotation_count} times{Colors.RESET}")
     print(f"{get_random_color()}{Colors.BRIGHT}⭐ Rarity threshold used: {RARITY_SCORE_THRESHOLD}+{Colors.RESET}")
     print(f"{get_random_color()}{Colors.BRIGHT}⏱️ Time taken: {elapsed_time:.2f} seconds{Colors.RESET}")
     print(f"{get_random_color()}{Colors.BRIGHT}⚡ Speed: {SUCCESS_COUNTER/elapsed_time:.2f} accounts/second{Colors.RESET}")
+    
+    # THÊM THÔNG TIN ROTATION
+    print(f"{get_random_color()}{Colors.BRIGHT}🔄 User-Agent rotations: {identity_manager.request_counter}{Colors.RESET}")
+    print(f"{get_random_color()}{Colors.BRIGHT}🌐 Proxy used: {identity_manager.use_proxy_fallback}{Colors.RESET}")
     
     if is_ghost:
         print(f"{Fore.LIGHTMAGENTA_EX}{Colors.BRIGHT}📁 GHOST accounts saved in: {GHOST_ACCOUNTS_FOLDER}{Colors.RESET}")
@@ -1237,9 +1252,10 @@ def generate_accounts_flow():
         print(f"{get_random_color()}{Colors.BRIGHT}💎 Rare accounts saved in: {RARE_ACCOUNTS_FOLDER}{Colors.RESET}")
         print(f"{get_random_color()}{Colors.BRIGHT}💑 Couples accounts saved in: {COUPLES_ACCOUNTS_FOLDER}{Colors.RESET}")
         print(f"{get_random_color()}{Colors.BRIGHT}🔐 JWT tokens saved in: {TOKENS_FOLDER}{Colors.RESET}")
-    
+        print(f"\n{get_random_color()}{Colors.BRIGHT}Press Enter to Continue {Colors.RESET}")
     wait_for_enter()
 
+# ====================== CÁC HÀM KHÁC GIỮ NGUYÊN ======================
 def view_saved_accounts():
     clear_screen()
     display_banner()
@@ -1274,6 +1290,7 @@ def view_saved_accounts():
             print(f"{Fore.RED}{Colors.BRIGHT}❌ Error reading {file_path}: {e}{Colors.RESET}")
     
     print(f"\n{get_random_color()}{Colors.BRIGHT}📊 Total accounts saved: {total_accounts}{Colors.RESET}")
+    print(f"\n{get_random_color()}{Colors.BRIGHT}Press Enter to Continue .{Colors.RESET}")
     wait_for_enter()
 
 def about_section():
@@ -1286,7 +1303,8 @@ def about_section():
     print(f"{get_random_color()}• {get_random_color()}GHOST Mode for special accounts{Colors.RESET}")
     print(f"{get_random_color()}• {get_random_color()}Automatic JWT token generation{Colors.RESET}")
     print(f"{get_random_color()}• {get_random_color()}Multi-threaded generation{Colors.RESET}")
-    print(f"{get_random_color()}• {get_random_color()}Simple IP rotation system{Colors.RESET}")
+    print(f"{get_random_color()}• {get_random_color()}NEW: User-Agent rotation anti-block{Colors.RESET}")  # THÊM
+    print(f"{get_random_color()}• {get_random_color()}NEW: Proxy fallback when blocked{Colors.RESET}")  # THÊM
     print(f"{get_random_color()}• {get_random_color()}Safe account storage in JSON format{Colors.RESET}")
     print(f"{get_random_color()}• {get_random_color()}Thread-safe file operations{Colors.RESET}")
     
