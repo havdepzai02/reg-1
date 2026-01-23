@@ -3,3 +3,4 @@ blackboxprotobuf
 pycryptodome
 requests
 asyncio
+PySocks
