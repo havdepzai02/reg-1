@@ -1,20 +1,23 @@
 #!/bin/bash
+echo "=== BẮT ĐẦU CHẠY TỰ ĐỘNG ==="
+echo "Codespace: $(hostname)"
+echo "Thời gian: $(date)"
 
-pip install -r 1.txt || exit 1
+# Cài đặt requirements nếu có
+if [ -f "1.txt" ]; then
+    pip install -r 1.txt
+fi
 
+# Chạy 1.py với input tự động
+echo "Đang chạy 1.py với input tự động..."
 (
-  sleep 1.5
-  printf "1\n"
-  sleep 1.5
-  printf "VN\n"
-  sleep 1.5
-  printf "10000\n"
-  sleep 1.5
-  printf "hav\n"
-  sleep 1.5
-  printf "hav\n"
-  sleep 1.5
-  printf "2\n"
-  sleep 1.5
-  printf "50\n"
+  sleep 1.5 && echo "1"
+  sleep 1.5 && echo "VN" 
+  sleep 1.5 && echo "10000"
+  sleep 1.5 && echo "hav"
+  sleep 1.5 && echo "hav"
+  sleep 1.5 && echo "2"
+  sleep 1.5 && echo "50"
 ) | python 1.py
+
+echo "=== KẾT THÚC ==="
