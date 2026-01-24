@@ -1,4 +1,3 @@
-# 1.py - Generator gửi accounts lên server sg-sgp05.altr.cc:25403
 import hmac
 import hashlib
 import requests
@@ -21,196 +20,62 @@ import psutil
 import re
 import subprocess
 import importlib
-import traceback
 
 init(autoreset=True)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# ========== PHẦN WEB SAVER TÍCH HỢP ==========
+# ========== CẤU HÌNH WEB SERVER ==========
+WEB_SERVER_URL = "http://sg-sgp05.altr.cc:25403"
 
 class WebSaver:
-    """Class để gửi data lên web server"""
-    
-    def __init__(self, server_url="http://sg-sgp05.altr.cc:25403"):
+    def __init__(self, server_url=WEB_SERVER_URL):
         self.server_url = server_url
         self.session = requests.Session()
         self.session.timeout = 30
         self.max_retries = 3
-        self.retry_delay = 2
-        
-        # Disable SSL warnings
-        import warnings
-        warnings.filterwarnings('ignore', message='Unverified HTTPS request')
-        
-        print(f"{Fore.CYAN}🔗 WebSaver initialized: {server_url}{Style.RESET_ALL}")
     
     def check_connection(self):
-        """Kiểm tra kết nối đến server"""
         try:
-            response = self.session.get(
-                f"{self.server_url}/api/health", 
-                timeout=10,
-                verify=False
-            )
-            if response.status_code == 200:
-                data = response.json()
-                print(f"{Fore.GREEN}✅ Connected to server: {self.server_url}{Style.RESET_ALL}")
-                print(f"{Fore.CYAN}📊 Server stats: {data.get('total_accounts', 0)} accounts{Style.RESET_ALL}")
-                return True
-            else:
-                print(f"{Fore.YELLOW}⚠️ Server returned status: {response.status_code}{Style.RESET_ALL}")
-                return False
-        except Exception as e:
-            print(f"{Fore.RED}❌ Cannot connect to server: {str(e)[:100]}{Style.RESET_ALL}")
+            response = requests.get(f"{self.server_url}/api/health", timeout=10, verify=False)
+            return response.status_code == 200
+        except:
             return False
     
-    def _send_with_retry(self, endpoint, data):
-        """Gửi request với retry"""
+    def save_account(self, name, password, uid, account_id="", region="", account_type="normal"):
         for attempt in range(self.max_retries):
             try:
-                url = f"{self.server_url}{endpoint}"
+                account_data = {
+                    "name": str(name),
+                    "password": str(password),
+                    "uid": str(uid),
+                    "account_id": str(account_id),
+                    "region": str(region),
+                    "type": account_type,
+                    "timestamp": datetime.now().isoformat()
+                }
+                
                 response = self.session.post(
-                    url,
-                    json=data,
+                    f"{self.server_url}/api/save_account",
+                    json=account_data,
                     timeout=30,
-                    verify=False,
-                    headers={'Content-Type': 'application/json'}
+                    verify=False
                 )
                 
                 if response.status_code == 200:
-                    try:
-                        return response.json()
-                    except:
-                        return {"status": "success"}
-                elif response.status_code in [429, 500, 502, 503, 504]:
-                    if attempt < self.max_retries - 1:
-                        time.sleep(self.retry_delay * (attempt + 1))
-                        continue
+                    return True
+                elif response.text and "Duplicate" in response.text:
+                    return True
                 
-                return {"status": "error", "code": response.status_code}
+                time.sleep(2)
                 
-            except requests.exceptions.Timeout:
-                if attempt < self.max_retries - 1:
-                    time.sleep(self.retry_delay * (attempt + 1))
-                    continue
-                return {"status": "timeout"}
             except Exception as e:
-                if attempt < self.max_retries - 1:
-                    time.sleep(self.retry_delay * (attempt + 1))
-                    continue
-                return {"status": "error", "message": str(e)}
+                if attempt == self.max_retries - 1:
+                    print(f"{Fore.RED}❌ Web save error: {e}{Style.RESET_ALL}")
+                time.sleep(3)
         
-        return {"status": "max_retries_exceeded"}
-    
-    def save_account(self, account_data):
-        """Gửi account lên server"""
-        result = self._send_with_retry("/api/save_account", account_data)
-        
-        if result.get("status") == "success":
-            print(f"{Fore.GREEN}✅ Account saved to server{Style.RESET_ALL}")
-            return True
-        elif result.get("status") == "duplicate":
-            print(f"{Fore.YELLOW}⚠️ Account already exists on server{Style.RESET_ALL}")
-            return True
-        else:
-            error_msg = result.get('message', f"Code: {result.get('code', 'Unknown')}")
-            print(f"{Fore.RED}❌ Failed to save account: {error_msg}{Style.RESET_ALL}")
-            return False
-    
-    def save_rare_account(self, rare_data):
-        """Gửi rare account lên server"""
-        result = self._send_with_retry("/api/save_rare_account", rare_data)
-        
-        if result.get("status") == "success":
-            print(f"{Fore.MAGENTA}💎 Rare account saved to server{Style.RESET_ALL}")
-            return True
-        else:
-            error_msg = result.get('message', f"Code: {result.get('code', 'Unknown')}")
-            print(f"{Fore.RED}❌ Failed to save rare account: {error_msg}{Style.RESET_ALL}")
-            return False
-    
-    def save_couples_account(self, couples_data):
-        """Gửi couples account lên server"""
-        result = self._send_with_retry("/api/save_couples_account", couples_data)
-        
-        if result.get("status") == "success":
-            print(f"{Fore.CYAN}💑 Couples account saved to server{Style.RESET_ALL}")
-            return True
-        else:
-            error_msg = result.get('message', f"Code: {result.get('code', 'Unknown')}")
-            print(f"{Fore.RED}❌ Failed to save couples account: {error_msg}{Style.RESET_ALL}")
-            return False
-    
-    def save_token(self, token_data):
-        """Gửi token lên server"""
-        result = self._send_with_retry("/api/save_token", token_data)
-        
-        if result.get("status") == "success":
-            print(f"{Fore.BLUE}🔐 Token saved to server{Style.RESET_ALL}")
-            return True
-        else:
-            error_msg = result.get('message', f"Code: {result.get('code', 'Unknown')}")
-            print(f"{Fore.RED}❌ Failed to save token: {error_msg}{Style.RESET_ALL}")
-            return False
-    
-    def get_stats(self):
-        """Lấy thống kê từ server"""
-        try:
-            response = self.session.get(
-                f"{self.server_url}/api/get_stats",
-                timeout=30,
-                verify=False
-            )
-            
-            if response.status_code == 200:
-                return response.json()
-            else:
-                return None
-        except Exception as e:
-            print(f"{Fore.RED}❌ Get stats error: {e}{Style.RESET_ALL}")
-            return None
+        return False
 
-# Khởi tạo WebSaver
-WEB_SAVER = WebSaver(server_url="http://sg-sgp05.altr.cc:25403")
-USE_WEB_SAVER = True  # Luôn bật web saver
-
-def send_account_async(account_data):
-    """Gửi account bất đồng bộ"""
-    def send():
-        WEB_SAVER.save_account(account_data)
-    
-    thread = threading.Thread(target=send)
-    thread.daemon = True
-    thread.start()
-
-def send_rare_account_async(rare_data):
-    """Gửi rare account bất đồng bộ"""
-    def send():
-        WEB_SAVER.save_rare_account(rare_data)
-    
-    thread = threading.Thread(target=send)
-    thread.daemon = True
-    thread.start()
-
-def send_couples_account_async(couples_data):
-    """Gửi couples account bất đồng bộ"""
-    def send():
-        WEB_SAVER.save_couples_account(couples_data)
-    
-    thread = threading.Thread(target=send)
-    thread.daemon = True
-    thread.start()
-
-def send_token_async(token_data):
-    """Gửi token bất đồng bộ"""
-    def send():
-        WEB_SAVER.save_token(token_data)
-    
-    thread = threading.Thread(target=send)
-    thread.daemon = True
-    thread.start()
-
-# ========== PHẦN GỐC CỦA 1.py ==========
+WEB_SAVER = WebSaver()
 
 def get_random_color():
     colors = [Fore.LIGHTGREEN_EX, Fore.LIGHTYELLOW_EX, Fore.LIGHTWHITE_EX, Fore.LIGHTBLUE_EX]
@@ -228,8 +93,19 @@ COUPLES_COUNTER = 0
 RARITY_SCORE_THRESHOLD = 3
 LOCK = threading.Lock()
 
-# Không cần tạo thư mục local nữa
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+BASE_FOLDER = os.path.join(CURRENT_DIR, "SAJEEB-ERA")
+TOKENS_FOLDER = os.path.join(BASE_FOLDER, "TOKENS-JWT")
+ACCOUNTS_FOLDER = os.path.join(BASE_FOLDER, "ACCOUNTS")
+RARE_ACCOUNTS_FOLDER = os.path.join(BASE_FOLDER, "RARE ACCOUNTS")
+COUPLES_ACCOUNTS_FOLDER = os.path.join(BASE_FOLDER, "COUPLES ACCOUNTS")
+GHOST_FOLDER = os.path.join(BASE_FOLDER, "GHOST")
+GHOST_ACCOUNTS_FOLDER = os.path.join(GHOST_FOLDER, "ACCOUNTS")
+GHOST_RARE_FOLDER = os.path.join(GHOST_FOLDER, "RAREACCOUNT")
+GHOST_COUPLES_FOLDER = os.path.join(GHOST_FOLDER, "COUPLESACCOUNT")
+
+for folder in [BASE_FOLDER, TOKENS_FOLDER, ACCOUNTS_FOLDER, RARE_ACCOUNTS_FOLDER, COUPLES_ACCOUNTS_FOLDER, GHOST_FOLDER, GHOST_ACCOUNTS_FOLDER, GHOST_RARE_FOLDER, GHOST_COUPLES_FOLDER]:
+    os.makedirs(folder, exist_ok=True)
 
 REGION_LANG = {"ME": "ar","IND": "hi","ID": "id","VN": "vi","TH": "th","BD": "bn","PK": "ur","TW": "zh","CIS": "ru","SAC": "es","BR": "pt"}
 REGION_URLS = {"IND": "https://client.ind.freefiremobile.com/","ID": "https://clientbp.ggblueshark.com/","BR": "https://client.us.freefiremobile.com/","ME": "https://clientbp.common.ggbluefox.com/","VN": "https://clientbp.ggblueshark.com/","TH": "https://clientbp.common.ggbluefox.com/","CIS": "https://clientbp.ggblueshark.com/","BD": "https://clientbp.ggblueshark.com/","PK": "https://clientbp.ggblueshark.com/","SG": "https://clientbp.ggblueshark.com/","SAC": "https://client.us.freefiremobile.com/","TW": "https://clientbp.ggblueshark.com/"}
@@ -238,6 +114,13 @@ key = bytes.fromhex(hex_key)
 hex_data = "U2FqZWViIEFoYW1lZCBQcmVtaXVtIEFjY291bnQgR2VuZXJhdG9y8J+OoA=="
 client_data = base64.b64decode(hex_data).decode('utf-8')
 GARENA = "QllfU0FKRUViX0FIQU1FRA=="
+
+FILE_LOCKS = {}
+
+def get_file_lock(filename):
+    if filename not in FILE_LOCKS:
+        FILE_LOCKS[filename] = threading.Lock()
+    return FILE_LOCKS[filename]
 
 ACCOUNT_RARITY_PATTERNS = {
     "REPEATED_DIGITS_4": [r"(\d)\1{3,}", 3],
@@ -360,10 +243,14 @@ def check_account_couple_patterns(account_id1, account_id2):
     return False, None
 
 def save_rare_account(account_data, rarity_type, reason, rarity_score, is_ghost=False):
-    """Lưu rare account (gửi lên server)"""
     try:
-        # Chuẩn bị rare data cho web
-        rare_data = {
+        if is_ghost:
+            rare_filename = os.path.join(GHOST_RARE_FOLDER, "rare-ghost.json")
+        else:
+            region = account_data.get('region', 'UNKNOWN')
+            rare_filename = os.path.join(RARE_ACCOUNTS_FOLDER, f"rare-{region}.json")
+        
+        rare_entry = {
             'uid': account_data["uid"],
             'password': account_data["password"],
             'account_id': account_data.get("account_id", "N/A"),
@@ -372,24 +259,57 @@ def save_rare_account(account_data, rarity_type, reason, rarity_score, is_ghost=
             'rarity_type': rarity_type,
             'rarity_score': rarity_score,
             'reason': reason,
-            'thread_id': account_data.get('thread_id', 'N/A'),
-            'is_ghost': is_ghost,
+            'date_identified': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'jwt_token': account_data.get('jwt_token', ''),
-            'timestamp': datetime.now().isoformat()
+            'thread_id': account_data.get('thread_id', 'N/A')
         }
         
-        # Gửi bất đồng bộ lên server
-        send_rare_account_async(rare_data)
-        return True
+        file_lock = get_file_lock(rare_filename)
+        with file_lock:
+            rare_list = []
+            if os.path.exists(rare_filename):
+                try:
+                    with open(rare_filename, 'r', encoding='utf-8') as f:
+                        rare_list = json.load(f)
+                except (json.JSONDecodeError, IOError):
+                    rare_list = []
+            
+            existing_ids = [acc.get('account_id') for acc in rare_list]
+            if account_data.get("account_id", "N/A") not in existing_ids:
+                rare_list.append(rare_entry)
+                
+                temp_filename = rare_filename + '.tmp'
+                with open(temp_filename, 'w', encoding='utf-8') as f:
+                    json.dump(rare_list, f, indent=2, ensure_ascii=False)
+                os.replace(temp_filename, rare_filename)
+                
+                # Gửi lên web server
+                WEB_SAVER.save_account(
+                    name=account_data["name"],
+                    password=account_data["password"],
+                    uid=account_data["uid"],
+                    account_id=account_data.get("account_id", "N/A"),
+                    region="GHOST" if is_ghost else account_data.get('region', 'UNKNOWN'),
+                    account_type="rare"
+                )
+                
+                return True
+            else:
+                return False
         
     except Exception as e:
-        print_error(f"Error saving rare account: {e}")
+        print(f"{Fore.RED}❌ Error saving rare account: {e}{Style.RESET_ALL}")
         return False
 
 def save_couples_account(account1, account2, reason, is_ghost=False):
-    """Lưu couples account (gửi lên server)"""
     try:
-        couples_data = {
+        if is_ghost:
+            couples_filename = os.path.join(GHOST_COUPLES_FOLDER, "couples-ghost.json")
+        else:
+            region = account1.get('region', 'UNKNOWN')
+            couples_filename = os.path.join(COUPLES_ACCOUNTS_FOLDER, f"couples-{region}.json")
+        
+        couples_entry = {
             'couple_id': f"{account1.get('account_id', 'N/A')}_{account2.get('account_id', 'N/A')}",
             'account1': {
                 'uid': account1["uid"],
@@ -407,16 +327,53 @@ def save_couples_account(account1, account2, reason, is_ghost=False):
             },
             'reason': reason,
             'region': "SAJEEB" if is_ghost else account1.get('region', 'UNKNOWN'),
-            'timestamp': datetime.now().isoformat(),
-            'is_ghost': is_ghost
+            'date_matched': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
         
-        # Gửi bất đồng bộ lên server
-        send_couples_account_async(couples_data)
-        return True
+        file_lock = get_file_lock(couples_filename)
+        with file_lock:
+            couples_list = []
+            if os.path.exists(couples_filename):
+                try:
+                    with open(couples_filename, 'r', encoding='utf-8') as f:
+                        couples_list = json.load(f)
+                except (json.JSONDecodeError, IOError):
+                    couples_list = []
+            
+            existing_couples = [couple.get('couple_id') for couple in couples_list]
+            if couples_entry['couple_id'] not in existing_couples:
+                couples_list.append(couples_entry)
+                
+                temp_filename = couples_filename + '.tmp'
+                with open(temp_filename, 'w', encoding='utf-8') as f:
+                    json.dump(couples_list, f, indent=2, ensure_ascii=False)
+                os.replace(temp_filename, couples_filename)
+                
+                # Gửi cả 2 accounts lên web server
+                WEB_SAVER.save_account(
+                    name=account1["name"],
+                    password=account1["password"],
+                    uid=account1["uid"],
+                    account_id=account1.get("account_id", "N/A"),
+                    region="GHOST" if is_ghost else account1.get('region', 'UNKNOWN'),
+                    account_type="couple"
+                )
+                
+                WEB_SAVER.save_account(
+                    name=account2["name"],
+                    password=account2["password"],
+                    uid=account2["uid"],
+                    account_id=account2.get("account_id", "N/A"),
+                    region="GHOST" if is_ghost else account2.get('region', 'UNKNOWN'),
+                    account_type="couple"
+                )
+                
+                return True
+            else:
+                return False
         
     except Exception as e:
-        print_error(f"Error saving couples account: {e}")
+        print(f"{Fore.RED}❌ Error saving couples account: {e}{Style.RESET_ALL}")
         return False
 
 def print_rarity_found(account_data, rarity_type, reason, rarity_score):
@@ -500,11 +457,12 @@ def display_banner():
                 
 {client_data}
 {Colors.RESET}
-\n{get_random_color()}{Colors.BRIGHT}🌐 CONNECTED TO SERVER: sg-sgp05.altr.cc:25403{Colors.RESET}
-\n{get_random_color()}{Colors.BRIGHT}📤 All accounts will be saved to web server{Colors.RESET}
-\n{get_random_color()}{Colors.BRIGHT}Dekho , Isme Sare Accounts Save honge Rare Couple Normal Sb Web Server Pe{Colors.RESET}
-\n{get_random_color()}{Colors.BRIGHT}Agar IP ban hota hai to agar wifi use nhi kr rhe tb aeroplane mode on off kro nhi to VPN use kro{Colors.RESET}
-\n{get_random_color()}{Colors.BRIGHT}Agr kiska generate nhi ho paa rha to option 11 try kro ghost mode{Colors.RESET}
+🌐 Web Server: {WEB_SERVER_URL}
+📤 All accounts will be saved to web server
+📁 Local backup in: {BASE_FOLDER}
+\n{get_random_color()}{Colors.BRIGHT}Dekho , Isme Sare Accounts Save honge Rare Couple Normal Sb \nAlg Alg Folders mein Aur agr bychance koi Rare id miss ho jata hai To wo Normal \nAccount ke Folder Me save Hoga.{Colors.RESET}{Colors.RESET}
+\n{get_random_color()}{Colors.BRIGHT}Agar IP ban hota hai to agar wifi use nhi kr rhe tb aeroplane mode on off kro nhi to VPN use kro\n
+{Colors.RESET}{get_random_color()}{Colors.BRIGHT} Agr kiska generate nhi ho paa rha to option 11 try kro ghost mode mtlb ki all server phir usko jha ki IP se login kroge vha lock ho jyegi id.
 """
     print(banner)
 
@@ -603,47 +561,100 @@ def encrypt_api(plain_text):
     return cipher_text.hex()
 
 def save_jwt_token(account_data, jwt_token, region, is_ghost=False):
-    """Lưu JWT token (gửi lên server)"""
     try:
-        token_data = {
+        if is_ghost:
+            token_filename = os.path.join(GHOST_FOLDER, "tokens-ghost.json")
+        else:
+            token_filename = os.path.join(TOKENS_FOLDER, f"tokens-{region}.json")
+        
+        token_entry = {
             'uid': account_data["uid"],
             'account_id': account_data.get("account_id", "N/A"),
             'jwt_token': jwt_token,
             'name': account_data["name"],
             'password': account_data["password"],
+            'date_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'region': "SAJEEB" if is_ghost else region,
-            'thread_id': account_data.get('thread_id', 'N/A'),
-            'timestamp': datetime.now().isoformat(),
-            'is_ghost': is_ghost
+            'thread_id': account_data.get('thread_id', 'N/A')
         }
         
-        # Gửi bất đồng bộ lên server
-        send_token_async(token_data)
-        return True
+        file_lock = get_file_lock(token_filename)
+        with file_lock:
+            tokens_list = []
+            if os.path.exists(token_filename):
+                try:
+                    with open(token_filename, 'r', encoding='utf-8') as f:
+                        tokens_list = json.load(f)
+                except (json.JSONDecodeError, IOError):
+                    tokens_list = []
+            
+            existing_account_ids = [token.get('account_id') for token in tokens_list]
+            if account_data.get("account_id", "N/A") not in existing_account_ids:
+                tokens_list.append(token_entry)
+                
+                temp_filename = token_filename + '.tmp'
+                with open(temp_filename, 'w', encoding='utf-8') as f:
+                    json.dump(tokens_list, f, indent=2, ensure_ascii=False)
+                
+                os.replace(temp_filename, token_filename)
+                return True
+            else:
+                return False
         
     except Exception as e:
         print_error(f"Error saving JWT token: {e}")
         return False
 
 def save_normal_account(account_data, region, is_ghost=False):
-    """Lưu account bình thường (gửi lên server)"""
     try:
-        # Chuẩn bị data cho web
-        web_data = {
+        if is_ghost:
+            account_filename = os.path.join(GHOST_ACCOUNTS_FOLDER, "ghost.json")
+        else:
+            account_filename = os.path.join(ACCOUNTS_FOLDER, f"accounts-{region}.json")
+        
+        account_entry = {
             'uid': account_data["uid"],
             'password': account_data["password"],
-            'name': account_data["name"],
             'account_id': account_data.get("account_id", "N/A"),
+            'name': account_data["name"],
             'region': "SAJEEB" if is_ghost else region,
-            'thread_id': account_data.get('thread_id', 'N/A'),
-            'is_ghost': is_ghost,
-            'timestamp': datetime.now().isoformat(),
-            'jwt_token': account_data.get('jwt_token', '')
+            'date_created': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'thread_id': account_data.get('thread_id', 'N/A')
         }
         
-        # Gửi bất đồng bộ lên server
-        send_account_async(web_data)
-        return True
+        file_lock = get_file_lock(account_filename)
+        with file_lock:
+            accounts_list = []
+            if os.path.exists(account_filename):
+                try:
+                    with open(account_filename, 'r', encoding='utf-8') as f:
+                        accounts_list = json.load(f)
+                except (json.JSONDecodeError, IOError):
+                    accounts_list = []
+            
+            existing_account_ids = [acc.get('account_id') for acc in accounts_list]
+            if account_data.get("account_id", "N/A") not in existing_account_ids:
+                accounts_list.append(account_entry)
+                
+                temp_filename = account_filename + '.tmp'
+                with open(temp_filename, 'w', encoding='utf-8') as f:
+                    json.dump(accounts_list, f, indent=2, ensure_ascii=False)
+                
+                os.replace(temp_filename, account_filename)
+                
+                # Gửi lên web server
+                WEB_SAVER.save_account(
+                    name=account_data["name"],
+                    password=account_data["password"],
+                    uid=account_data["uid"],
+                    account_id=account_data.get("account_id", "N/A"),
+                    region="GHOST" if is_ghost else region,
+                    account_type="normal"
+                )
+                
+                return True
+            else:
+                return False
         
     except Exception as e:
         print_error(f"Error saving normal account: {e}")
@@ -953,30 +964,42 @@ def generate_single_account(region, account_name, password_prefix, total_account
     print_registration_status(current_count, total_accounts, account_result["name"], 
                             account_result["uid"], account_result["password"], account_id, region, is_ghost)
     
-    # Lưu account bình thường lên server
-    save_normal_account(account_result, region, is_ghost)
-    
-    # Kiểm tra và lưu rare account
     is_rare, rarity_type, rarity_reason, rarity_score = check_account_rarity(account_result)
     if is_rare:
         with LOCK:
             RARE_COUNTER += 1
         print_rarity_found(account_result, rarity_type, rarity_reason, rarity_score)
         save_rare_account(account_result, rarity_type, rarity_reason, rarity_score, is_ghost)
-        print_success(f"💎 Rare account sent to server! (Total rare: {RARE_COUNTER})")
+        print_success(f"💎 Rare account saved! (Total rare: {RARE_COUNTER})")
     
-    # Kiểm tra và lưu couples account
     is_couple, couple_reason, partner_data = check_account_couples(account_result, thread_id)
     if is_couple and partner_data:
         with LOCK:
             COUPLES_COUNTER += 1
         print_couples_found(account_result, partner_data, couple_reason)
         save_couples_account(account_result, partner_data, couple_reason, is_ghost)
-        print_success(f"💑 Couples accounts sent to server! (Total couples: {COUPLES_COUNTER})")
+        print_success(f"💑 Couples accounts saved! (Total couples: {COUPLES_COUNTER})")
     
-    # Lưu JWT token nếu có
-    if jwt_token:
-        save_jwt_token(account_result, jwt_token, region, is_ghost)
+    if is_ghost:
+        save_success = save_normal_account(account_result, "GHOST", is_ghost=True)
+        if save_success:
+            print_success(f"GHOST account saved")
+        
+        if jwt_token:
+            token_saved = save_jwt_token(account_result, jwt_token, "GHOST", is_ghost=True)
+            if token_saved:
+                print_success(f"JWT token saved for GHOST account")
+    else:
+        save_success = save_normal_account(account_result, region)
+        if save_success:
+            print_success(f"Account #{current_count} saved to ACCOUNTS folder")
+        else:
+            print_warning(f"Account {account_result['uid']} already exists")
+        
+        if jwt_token:
+            token_saved = save_jwt_token(account_result, jwt_token, region)
+            if token_saved:
+                print_success(f"JWT token saved for {account_result['uid']}")
     
     return {"account": account_result}
 
@@ -996,7 +1019,7 @@ def worker(region, account_name, password_prefix, total_accounts, thread_id, is_
         
         time.sleep(random.uniform(0.5, 1.5))
     
-    print(f"{thread_color}{Colors.BRIGHT}🧵 Thread {thread_id} finished: {accounts_generated} accounts sent to server{Colors.RESET}")
+    print(f"{thread_color}{Colors.BRIGHT}🧵 Thread {thread_id} finished: {accounts_generated} accounts generated{Colors.RESET}")
 
 def wait_for_enter():
     print(f"\n{get_random_color()}{Colors.BRIGHT}⏎ Press Enter to continue...{Colors.RESET}")
@@ -1004,16 +1027,6 @@ def wait_for_enter():
 
 def generate_accounts_flow():
     global SUCCESS_COUNTER, TARGET_ACCOUNTS, RARE_COUNTER, COUPLES_COUNTER, RARITY_SCORE_THRESHOLD
-    
-    # Kiểm tra kết nối server trước
-    print(f"\n{get_random_color()}{Colors.BRIGHT}🔗 Checking server connection...{Colors.RESET}")
-    if not WEB_SAVER.check_connection():
-        print_warning("⚠️ Cannot connect to server.")
-        print_warning("Accounts cannot be saved without server connection.")
-        response = input(f"{Fore.YELLOW}Exit and try again? (y/n): {Style.RESET_ALL}").lower()
-        if response != 'n':
-            return
-    
     clear_screen()
     display_banner()
     
@@ -1077,7 +1090,7 @@ def generate_accounts_flow():
 
     while True:
         try:
-            account_count = int(input(f"\n{get_random_color()}{Colors.BRIGHT}🎯 Total Accounts to Generate: {Colors.RESET}"))
+            account_count = int(input(f"\n{get_random_color()}{Colors.BRIGHT}🎯 Total Accounts to Generate Mixed: {Colors.RESET}"))
             if account_count > 0:
                 break
             else:
@@ -1103,7 +1116,7 @@ def generate_accounts_flow():
 
     while True:
         try:
-            rarity_threshold = int(input(f"\n{get_random_color()}{Colors.BRIGHT}⭐ Rarity Threshold (default 2): {Colors.RESET}"))
+            rarity_threshold = int(input(f"\n{get_random_color()}{Colors.BRIGHT}⭐ Rarity Threshold Put 2: {Colors.RESET}"))
             if 1 <= rarity_threshold <= 10:
                 RARITY_SCORE_THRESHOLD = rarity_threshold
                 break
@@ -1116,7 +1129,7 @@ def generate_accounts_flow():
 
     while True:
         try:
-            thread_count = int(input(f"\n{get_random_color()}{Colors.BRIGHT}🧵 Thread Count (Recommended: {recommended_threads}): {Colors.RESET}"))
+            thread_count = int(input(f"\n{get_random_color()}{Colors.BRIGHT}🧵 Speed/Thread Count : Put less than 5 Jitna km Utna IP BAN KM (Recommended: {recommended_threads}): {Colors.RESET}"))
             if thread_count > 0:
                 break
             else:
@@ -1139,7 +1152,8 @@ def generate_accounts_flow():
     print(f"{get_random_color()}{Colors.BRIGHT}🔑 Password Prefix: {password_prefix}{Colors.RESET}")
     print(f"{get_random_color()}{Colors.BRIGHT}⭐ Rarity Threshold: {RARITY_SCORE_THRESHOLD}+{Colors.RESET}")
     print(f"{get_random_color()}{Colors.BRIGHT}🧵 Threads: {thread_count}{Colors.RESET}")
-    print(f"{get_random_color()}{Colors.BRIGHT}🌐 Server: sg-sgp05.altr.cc:25403{Colors.RESET}")
+    print(f"{get_random_color()}{Colors.BRIGHT}📁 Saving to: {ACCOUNTS_FOLDER}{Colors.RESET}")
+    print(f"{get_random_color()}{Colors.BRIGHT}🌐 Web Server: {WEB_SERVER_URL}{Colors.RESET}")
     print(f"\n{get_random_color()}{Colors.BRIGHT}⏳ Starting in 3 seconds...{Colors.RESET}")
     time.sleep(3)
 
@@ -1181,69 +1195,61 @@ def generate_accounts_flow():
     elapsed_time = end_time - start_time
 
     print(f"\n{get_random_color()}{Colors.BRIGHT}🎉 Generation completed!{Colors.RESET}")
-    print(f"{get_random_color()}{Colors.BRIGHT}📊 Accounts sent to server: {SUCCESS_COUNTER}/{account_count}{Colors.RESET}")
+    print(f"{get_random_color()}{Colors.BRIGHT}📊 Accounts generated: {SUCCESS_COUNTER}/{account_count}{Colors.RESET}")
     print(f"{get_random_color()}{Colors.BRIGHT}💎 Rare accounts found: {RARE_COUNTER}{Colors.RESET}")
     print(f"{get_random_color()}{Colors.BRIGHT}💑 Couples pairs found: {COUPLES_COUNTER}{Colors.RESET}")
     print(f"{get_random_color()}{Colors.BRIGHT}⭐ Rarity threshold used: {RARITY_SCORE_THRESHOLD}+{Colors.RESET}")
     print(f"{get_random_color()}{Colors.BRIGHT}⏱️ Time taken: {elapsed_time:.2f} seconds{Colors.RESET}")
     print(f"{get_random_color()}{Colors.BRIGHT}⚡ Speed: {SUCCESS_COUNTER/elapsed_time:.2f} accounts/second{Colors.RESET}")
-    print(f"{get_random_color()}{Colors.BRIGHT}🌐 All accounts saved to: sg-sgp05.altr.cc:25403{Colors.RESET}")
+    print(f"{get_random_color()}{Colors.BRIGHT}🌐 All accounts sent to: {WEB_SERVER_URL}{Colors.RESET}")
     
-    # Lấy stats từ server
-    try:
-        stats = WEB_SAVER.get_stats()
-        if stats:
-            print(f"\n{Fore.CYAN}{Colors.BRIGHT}📈 SERVER STATS:{Colors.RESET}")
-            print(f"{Fore.CYAN}📊 Total accounts on server: {stats.get('total_accounts', 0)}{Colors.RESET}")
-            print(f"{Fore.CYAN}💎 Rare accounts on server: {stats.get('total_rare_accounts', 0)}{Colors.RESET}")
-            print(f"{Fore.CYAN}💑 Couples on server: {stats.get('total_couples_accounts', 0)}{Colors.RESET}")
-            print(f"{Fore.CYAN}🔐 Tokens on server: {stats.get('total_tokens', 0)}{Colors.RESET}")
-    except:
-        pass
-    
-    print(f"\n{get_random_color()}{Colors.BRIGHT}Press Enter to Continue...{Colors.RESET}")
+    if is_ghost:
+        print(f"{Fore.LIGHTMAGENTA_EX}{Colors.BRIGHT}📁 GHOST accounts saved in: {GHOST_ACCOUNTS_FOLDER}{Colors.RESET}")
+        print(f"{Fore.LIGHTMAGENTA_EX}{Colors.BRIGHT}💎 Rare GHOST accounts saved in: {GHOST_RARE_FOLDER}{Colors.RESET}")
+        print(f"{Fore.LIGHTMAGENTA_EX}{Colors.BRIGHT}💑 Couples GHOST accounts saved in: {GHOST_COUPLES_FOLDER}{Colors.RESET}")
+    else:
+        print(f"{get_random_color()}{Colors.BRIGHT}📁 Accounts saved in: {ACCOUNTS_FOLDER}{Colors.RESET}")
+        print(f"{get_random_color()}{Colors.BRIGHT}💎 Rare accounts saved in: {RARE_ACCOUNTS_FOLDER}{Colors.RESET}")
+        print(f"{get_random_color()}{Colors.BRIGHT}💑 Couples accounts saved in: {COUPLES_ACCOUNTS_FOLDER}{Colors.RESET}")
+        print(f"{get_random_color()}{Colors.BRIGHT}🔐 JWT tokens saved in: {TOKENS_FOLDER}{Colors.RESET}")
+        print(f"\n{get_random_color()}{Colors.BRIGHT}Press Enter to Continue {Colors.RESET}")
     wait_for_enter()
 
-def view_server_stats():
-    """Xem thống kê từ server"""
+def view_saved_accounts():
     clear_screen()
     display_banner()
     
-    print(f"{get_random_color()}{Colors.BRIGHT}📊 Viewing Server Stats{Colors.RESET}")
+    print(f"{get_random_color()}{Colors.BRIGHT}📁 Viewing Saved Accounts{Colors.RESET}")
     
-    try:
-        stats = WEB_SAVER.get_stats()
-        if stats:
-            print(f"\n{Fore.CYAN}{Colors.BRIGHT}🌐 Server: {stats.get('server', 'Unknown')}{Colors.RESET}")
-            print(f"{Fore.CYAN}🕒 Last Updated: {stats.get('timestamp', 'Unknown')}{Colors.RESET}")
-            print(f"{Fore.CYAN}📊 Total Accounts: {stats.get('total_accounts', 0)}{Colors.RESET}")
-            print(f"{Fore.CYAN}💎 Rare Accounts: {stats.get('total_rare_accounts', 0)}{Colors.RESET}")
-            print(f"{Fore.CYAN}💑 Couples Accounts: {stats.get('total_couples_accounts', 0)}{Colors.RESET}")
-            print(f"{Fore.CYAN}🔐 Tokens: {stats.get('total_tokens', 0)}{Colors.RESET}")
-            
-            print(f"\n{Fore.YELLOW}{Colors.BRIGHT}🌍 Accounts by Region:{Colors.RESET}")
-            regions = stats.get('regions', {})
-            if regions:
-                for region, count in regions.items():
-                    print(f"  {region}: {count}")
-            else:
-                print("  No region data")
-            
-            print(f"\n{Fore.GREEN}{Colors.BRIGHT}💾 Storage:{Colors.RESET}")
-            storage = stats.get('storage', {})
-            print(f"  Total Size: {storage.get('total_files_mb', 0)} MB")
-            print(f"  Main File: {storage.get('main_file_mb', 0)} MB")
-            
-            print(f"\n{Fore.MAGENTA}{Colors.BRIGHT}⚡ Performance:{Colors.RESET}")
-            perf = stats.get('performance', {})
-            print(f"  Uptime: {perf.get('uptime', 'Unknown')}")
-            print(f"  Total Requests: {perf.get('total_requests', 0)}")
-            print(f"  Accounts/Minute: {perf.get('accounts_per_minute', 0)}")
-        else:
-            print(f"\n{Fore.RED}❌ Could not fetch stats from server{Style.RESET_ALL}")
-    except Exception as e:
-        print(f"\n{Fore.RED}❌ Error fetching stats: {e}{Style.RESET_ALL}")
+    account_files = []
     
+    if os.path.exists(ACCOUNTS_FOLDER):
+        for file in os.listdir(ACCOUNTS_FOLDER):
+            if file.endswith('.json'):
+                account_files.append(os.path.join(ACCOUNTS_FOLDER, file))
+    
+    ghost_file = os.path.join(GHOST_ACCOUNTS_FOLDER, "ghost.json")
+    if os.path.exists(ghost_file):
+        account_files.append(ghost_file)
+    
+    if not account_files:
+        print(f"\n{Fore.YELLOW}{Colors.BRIGHT}📭 No saved accounts found.{Colors.RESET}")
+        wait_for_enter()
+        return
+    
+    total_accounts = 0
+    for file_path in account_files:
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                accounts = json.load(f)
+                file_name = os.path.basename(file_path)
+                print(f"\n{get_random_color()}{Colors.BRIGHT}📄 {file_name}: {len(accounts)} accounts{Colors.RESET}")
+                total_accounts += len(accounts)
+        except Exception as e:
+            print(f"{Fore.RED}{Colors.BRIGHT}❌ Error reading {file_path}: {e}{Colors.RESET}")
+    
+    print(f"\n{get_random_color()}{Colors.BRIGHT}📊 Total accounts saved: {total_accounts}{Colors.RESET}")
+    print(f"\n{get_random_color()}{Colors.BRIGHT}Press Enter to Continue .{Colors.RESET}")
     wait_for_enter()
 
 def about_section():
@@ -1252,18 +1258,18 @@ def about_section():
     
     print(f"{get_random_color()}{Colors.BRIGHT}ℹ️  About SAJEEB Account Generator{Colors.RESET}")
     print(f"\n{get_random_color()}{Colors.BRIGHT}✨ Features:{Colors.RESET}")
-    print(f"{get_random_color()}• Generate Free Fire accounts for multiple regions{Colors.RESET}")
-    print(f"{get_random_color()}• GHOST Mode for special accounts{Colors.RESET}")
-    print(f"{get_random_color()}• All accounts saved to web server{Colors.RESET}")
-    print(f"{get_random_color()}• Automatic JWT token generation{Colors.RESET}")
-    print(f"{get_random_color()}• Multi-threaded generation{Colors.RESET}")
-    print(f"{get_random_color()}• Rare account detection{Colors.RESET}")
-    print(f"{get_random_color()}• Couples account matching{Colors.RESET}")
+    print(f"{get_random_color()}• {get_random_color()}Generate Free Fire accounts for multiple regions{Colors.RESET}")
+    print(f"{get_random_color()}• {get_random_color()}GHOST Mode for special accounts{Colors.RESET}")
+    print(f"{get_random_color()}• {get_random_color()}Automatic JWT token generation{Colors.RESET}")
+    print(f"{get_random_color()}• {get_random_color()}Multi-threaded generation{Colors.RESET}")
+    print(f"{get_random_color()}• {get_random_color()}Safe account storage in JSON format{Colors.RESET}")
+    print(f"{get_random_color()}• {get_random_color()}Thread-safe file operations{Colors.RESET}")
+    print(f"{get_random_color()}• {get_random_color()}Web server backup to: {WEB_SERVER_URL}{Colors.RESET}")
     
-    print(f"\n{get_random_color()}{Colors.BRIGHT}🌐 Web Server:{Colors.RESET}")
-    print(f"{get_random_color()}• Server: sg-sgp05.altr.cc:25403{Colors.RESET}")
-    print(f"{get_random_color()}• All data saved to single JSON file{Colors.RESET}")
-    print(f"{get_random_color()}• Real-time statistics{Colors.RESET}")
+    print(f"\n{get_random_color()}{Colors.BRIGHT}📁 Storage Locations:{Colors.RESET}")
+    print(f"{get_random_color()}• {get_random_color()}Accounts: {ACCOUNTS_FOLDER}{Colors.RESET}")
+    print(f"{get_random_color()}• {get_random_color()}JWT Tokens: {TOKENS_FOLDER}{Colors.RESET}")
+    print(f"{get_random_color()}• {get_random_color()}GHOST Accounts: {GHOST_ACCOUNTS_FOLDER}{Colors.RESET}")
     
     print(f"\n{get_random_color()}{Colors.BRIGHT}⚠️  Disclaimer:{Colors.RESET}")
     print(f"{get_random_color()}This tool is for educational purposes only.{Colors.RESET}")
@@ -1279,7 +1285,7 @@ def main_menu():
         print(f"{get_random_color()}{Colors.BRIGHT}🎮 Welcome to SAJEEB Account Generator{Colors.RESET}")
         print(f"\n{get_random_color()}{Colors.BRIGHT}📋 Available Options:{Colors.RESET}")
         print(f"{get_random_color()}1) {get_random_color()}Generate Accounts{Colors.RESET}")
-        print(f"{get_random_color()}2) {get_random_color()}View Server Stats{Colors.RESET}")
+        print(f"{get_random_color()}2) {get_random_color()}View Saved Accounts{Colors.RESET}")
         print(f"{get_random_color()}3) {get_random_color()}About{Colors.RESET}")
         print(f"{get_random_color()}0) {Fore.RED}Exit{Colors.RESET}")
 
@@ -1289,7 +1295,7 @@ def main_menu():
             if choice == "1":
                 generate_accounts_flow()
             elif choice == "2":
-                view_server_stats()
+                view_saved_accounts()
             elif choice == "3":
                 about_section()
             elif choice == "0":
@@ -1304,25 +1310,18 @@ def main_menu():
 if __name__ == "__main__":
     try:
         if install_requirements():
-            print(f"\n{Fore.GREEN}✅ All requirements installed{Style.RESET_ALL}")
-            print(f"{Fore.CYAN}🔗 Checking server connection...{Style.RESET_ALL}")
+            # Kiểm tra kết nối server
+            print(f"{get_random_color()}{Colors.BRIGHT}🔗 Checking server connection...{Colors.RESET}")
             if WEB_SAVER.check_connection():
-                print(f"{Fore.GREEN}✅ Ready to generate accounts!{Style.RESET_ALL}")
+                print(f"{Fore.GREEN}✅ Connected to server: {WEB_SERVER_URL}{Colors.RESET}")
             else:
-                print(f"{Fore.RED}❌ Cannot connect to server. Please check:{Style.RESET_ALL}")
-                print(f"{Fore.YELLOW}  1. Server is running on sg-sgp05.altr.cc:25403{Style.RESET_ALL}")
-                print(f"{Fore.YELLOW}  2. Network connection is working{Style.RESET_ALL}")
-                print(f"{Fore.YELLOW}  3. Port 25403 is accessible{Style.RESET_ALL}")
-                response = input(f"\n{Fore.YELLOW}Continue anyway? (y/n): {Style.RESET_ALL}").lower()
-                if response != 'y':
-                    sys.exit(1)
+                print(f"{Fore.YELLOW}⚠️ Cannot connect to server, but will try anyway{Colors.RESET}")
             time.sleep(2)
             main_menu()
     except KeyboardInterrupt:
         safe_exit()
     except Exception as e:
         print_error(f"Unexpected error: {e}")
-        traceback.print_exc()
         print(f"\n{Fore.YELLOW}{Colors.BRIGHT}🔄 Restarting script...{Colors.RESET}")
         time.sleep(2)
         os.execv(sys.executable, [sys.executable] + sys.argv)
